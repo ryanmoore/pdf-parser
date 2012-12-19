@@ -31,11 +31,13 @@ def main(argv):
         assert doc.is_extractable
 
         for page in extract_text(doc, config):
-            for i, t in enumerate(page):
-                pass
-                print i, t
+            organize_page(page)
 
     return 0
+
+def organize_page(page):
+    for coord, line in sorted(page):
+        print coord, line
 
 def extract_text(doc, config):
     rsrcmanager = PDFResourceManager()
@@ -55,14 +57,23 @@ def extract_text(doc, config):
         layout = device.get_result()
 
         text = []
-        print dir(layout)
+        #print dir(layout)
         #print layout.objs
         for obj in layout:
             if isinstance(obj, LTTextBox):
-                print 'BOX'
-                text.append(obj.get_text())
+                #print('({}. {}), ({}, {})'.format(obj.x0, obj.y0, obj.x1, obj.y1))
+                #print obj.get_text()
+                for line in obj:
+                    coord = ((line.x0, line.y0), (line.x1, line.y1))
+                    text.append((coord, line.get_text()))
+                    #print dir(line)
+                    #print line.get_text()
+                    #raw_input()
+                #text.append(obj.get_text())
             elif isinstance(obj, LTTextLine):
-                print 'LINE'
+                assert False, 'Expected no lines at top of tree'
+            else:
+                pass
 
         yield text
 
