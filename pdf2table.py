@@ -21,31 +21,28 @@ from pdfminer.pdfdevice import PDFDevice
 from pdfminer.layout import LAParams, LTTextBox, LTTextLine
 from pdfminer.converter import PDFPageAggregator
 
+import csv
+
 def main(argv):
 
     config = parse_config(argv[1:])
 
     with open(config.input, 'rb') as infile:
-        parser = PDFParser(infile)
-        doc    = PDFDocument()
-        parser.set_document(doc)
-        doc.set_parser(parser)
-        doc.initialize()
+        with open(config.output, 'wb') as outfile:
+            writer = csv.writer(outfile)
 
-        assert doc.is_extractable
+            parser = PDFParser(infile)
+            doc    = PDFDocument()
+            parser.set_document(doc)
+            doc.set_parser(parser)
+            doc.initialize()
 
-        for page in extract_text(doc, config):
-            breakdown = PageBreakdown(page)
-            print breakdown.location
-            breakdown.clean_table()
-            continue
-            for e in sorted(breakdown.table):
-                colid, rem = divmod(e[0][0][0], 5)
+            assert doc.is_extractable
 
-                print divmod(e[0][0][0], 5)
-                print e[0]
-                print e[1].strip()
-
+            for page in extract_text(doc, config):
+                breakdown = PageBreakdown(page)
+                print breakdown.location
+                breakdown.write_table(writer)
     return 0
 
 def find_lt(val, iterable, mapping=None):
@@ -65,8 +62,25 @@ class PageBreakdown(object):
 
         self.location = org_page['LOCATION'][0].get_text().strip()
         self.table = org_page['TABLE']
+        self.cleaned = False
+
+    def pprint_table(self):
+        for row in self.table:
+            for elt in row:
+                try:
+                    sys.stdout.write('{}, '.format(elt.get_text().strip()))
+                except:
+                    sys.stdout.write('{}, '.format(elt))
+            sys.stdout.write('\n'+'-'*20+'\n')
+
+    def write_table(self, outcsv):
+        self.clean_table()
+        outcsv.writerows(self.table)
 
     def clean_table(self):
+        if self.cleaned:
+            return
+        self.cleaned = True
 
         #self.table = sorted(self.table, key=lambda x: (x.x0, -x.y0))
         row_indices = filter(lambda x: x.x1<40, self.table)
@@ -78,20 +92,43 @@ class PageBreakdown(object):
         for k, v in zip(item_row_indices, self.table):
             rows[k].append(v)
 
-        col_dividers = []
-        rows = zip(sorted(rows.items()))[1]
-        print rows
-        sys.exit(1)
-        #sort each row by x0
-        rows = dict( [ (k, sorted(v, key=lambda x:(x.x0, -x.y0))) for k,v in rows.items() ] )
-        for k,v in sorted(rows.items()):
-            for i in v:
-                sys.stdout.write('{} ({}), '.format(i.get_text().strip(), int(i.x0)))
-            for i in v[1:]:
-                idx = find_lt(i.x0,
-            print
+        #only take the values, but order them by their key
+        rows = zip(*sorted(rows.items()))[1]
 
-        return
+        #sort each row by x0
+        rows = [ sorted(r, key=lambda x:(x.x0, -x.y0)) for r in rows ]
+
+        #first column is easy, all rows have an index
+        self.table = [ [ r[0].get_text().strip() ] for r in rows ]
+        #first column done, remove it
+        rows = [ r[1:] for r in rows ]
+
+
+        col_xvalues = sorted( map(lambda x: x.x0, list( itertools.chain.from_iterable(rows) ) ) )
+        col_dividers = []
+        for v in col_xvalues:
+            if all( abs(x-v)>30 for x in col_dividers):
+                col_dividers.append(int(v))
+
+        #print col_dividers
+        #print len(col_dividers)
+
+        #fill out table with empty values for all columns except first (already completed)
+        self.table = [ row+[ '' for c in col_dividers ] for row in self.table ]
+
+        #populate table
+        for row_index,r in enumerate(rows):
+            for elt in r:
+                index = bisect.bisect_left( col_dividers, elt.x0 )
+                #if the string is nonempty, separate with backslash
+                if self.table[row_index][index]:
+                    div_symbol = '\\'
+                else:
+                    div_symbol = ''
+                self.table[row_index][index] += div_symbol+elt.get_text().strip()
+
+            #all should have populated final column
+            assert self.table[row_index][-1] is not None
 
     @staticmethod
     def _org_page(page):
@@ -166,6 +203,10 @@ def parse_config(argv):
             type=int,
             default=None,
             help='Specifies a single page to convert')
+    parser.add_argument('--output', '-o',
+            type=str,
+            required=True,
+            help='Specifies the destination file')
 
     return parser.parse_args(args=argv)
 
