@@ -78,11 +78,17 @@ class PageBreakdown(object):
         for k, v in zip(item_row_indices, self.table):
             rows[k].append(v)
 
+        col_dividers = []
+        rows = zip(sorted(rows.items()))[1]
+        print rows
+        sys.exit(1)
+        #sort each row by x0
         rows = dict( [ (k, sorted(v, key=lambda x:(x.x0, -x.y0))) for k,v in rows.items() ] )
         for k,v in sorted(rows.items()):
             for i in v:
                 sys.stdout.write('{} ({}), '.format(i.get_text().strip(), int(i.x0)))
-            for i in v[1:]
+            for i in v[1:]:
+                idx = find_lt(i.x0,
             print
 
         return
