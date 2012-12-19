@@ -8,6 +8,10 @@ import re
 import math
 import collections
 import bisect
+import time
+import datetime
+
+COLUMN_PADDING = 30
 
 # A fair bit of motivation for this is derived from:
 #   1. The makers tutorial page
@@ -27,6 +31,7 @@ def main(argv):
 
     config = parse_config(argv[1:])
 
+    start = time.time()
     with open(config.input, 'rb') as infile:
         with open(config.output, 'wb') as outfile:
             writer = csv.writer(outfile)
@@ -39,11 +44,40 @@ def main(argv):
 
             assert doc.is_extractable
 
-            for page in extract_text(doc, config):
-                breakdown = PageBreakdown(page)
-                print breakdown.location
+            template_page = create_breakdown(next(itertools.islice(doc.get_pages(), config.template, config.template+1)), None)
+            template_page.clean_table()
+
+            print 'Doing pages ( {}, {} )'.format(config.start, config.end)
+            pages = itertools.islice(doc.get_pages(), config.start-1, config.end-1)
+
+            for i,page in enumerate(pages):
+                breakdown = create_breakdown(page, template_page.col_dividers)
+                print('{} ( {} / {} ) {}'.format(str(datetime.timedelta(seconds=int(time.time()-start))), i+1, config.end-config.start, breakdown.location))
                 breakdown.write_table(writer)
+    print 'Elapsed:', str(datetime.timedelta(seconds=int(time.time()-start)))
     return 0
+
+def create_breakdown(page, col_dividers):
+    rsrcmanager = PDFResourceManager()
+    laparams = LAParams()
+    device = PDFPageAggregator(rsrcmanager, laparams=laparams)
+    interpreter = PDFPageInterpreter(rsrcmanager, device)
+
+    interpreter.process_page(page)
+    layout = device.get_result()
+
+    text = []
+    for obj in layout:
+        if isinstance(obj, LTTextBox):
+            for line in obj:
+                text.append(line)
+        elif isinstance(obj, LTTextLine):
+            assert False, 'Expected no lines at top of tree'
+        else:
+            pass
+
+    return PageBreakdown(text, col_dividers)
+
 
 def find_lt(val, iterable, mapping=None):
     if mapping:
@@ -52,7 +86,7 @@ def find_lt(val, iterable, mapping=None):
 
 
 class PageBreakdown(object):
-    def __init__(self, page):
+    def __init__(self, page, col_dividers=None):
         super(PageBreakdown, self).__init__()
 
         self.raw = page
@@ -63,6 +97,7 @@ class PageBreakdown(object):
         self.location = org_page['LOCATION'][0].get_text().strip()
         self.table = org_page['TABLE']
         self.cleaned = False
+        self.col_dividers = col_dividers
 
     def pprint_table(self):
         for row in self.table:
@@ -82,6 +117,8 @@ class PageBreakdown(object):
             return
         self.cleaned = True
 
+        self.table = [ x for x in self.table if len(x.get_text().strip()) ]
+
         #self.table = sorted(self.table, key=lambda x: (x.x0, -x.y0))
         row_indices = filter(lambda x: x.x1<40, self.table)
         row_dividers = map(lambda x: x.y0+5, row_indices)
@@ -99,27 +136,27 @@ class PageBreakdown(object):
         rows = [ sorted(r, key=lambda x:(x.x0, -x.y0)) for r in rows ]
 
         #first column is easy, all rows have an index
-        self.table = [ [ r[0].get_text().strip() ] for r in rows ]
+        self.table = [ [ self.location, r[0].get_text().strip() ] for r in rows ]
         #first column done, remove it
         rows = [ r[1:] for r in rows ]
 
 
-        col_xvalues = sorted( map(lambda x: x.x0, list( itertools.chain.from_iterable(rows) ) ) )
-        col_dividers = []
-        for v in col_xvalues:
-            if all( abs(x-v)>30 for x in col_dividers):
-                col_dividers.append(int(v))
+        if self.col_dividers is None:
+            col_xvalues = sorted( map(lambda x: x.x0, list( itertools.chain.from_iterable(rows) ) ) )
+            self.col_dividers = []
+            for v in col_xvalues:
+                if all( abs(x-v)>COLUMN_PADDING for x in self.col_dividers):
+                    self.col_dividers.append(int(v))
 
-        #print col_dividers
-        #print len(col_dividers)
+            print self.col_dividers
 
         #fill out table with empty values for all columns except first (already completed)
-        self.table = [ row+[ '' for c in col_dividers ] for row in self.table ]
+        self.table = [ row+[ '' for c in self.col_dividers ] for row in self.table ]
 
         #populate table
         for row_index,r in enumerate(rows):
             for elt in r:
-                index = bisect.bisect_left( col_dividers, elt.x0 )
+                index = bisect.bisect_left( self.col_dividers, elt.x0 ) + 1
                 #if the string is nonempty, separate with backslash
                 if self.table[row_index][index]:
                     div_symbol = '\\'
@@ -207,6 +244,18 @@ def parse_config(argv):
             type=str,
             required=True,
             help='Specifies the destination file')
+    parser.add_argument('--template', '-t',
+            type=int,
+            required=True,
+            help='The index of a page which should be used to generate column divisions')
+    parser.add_argument('--start', '-s',
+            type=int,
+            required=True,
+            help='The index giving which page to start the processing.')
+    parser.add_argument('--end', '-e',
+            type=int,
+            default=None,
+            help='The index giving which page to stop the processing. None is end.')
 
     return parser.parse_args(args=argv)
 
