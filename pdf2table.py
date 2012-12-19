@@ -32,6 +32,7 @@ def main(argv):
 
         for page in extract_text(doc, config):
             for i, t in enumerate(page):
+                pass
                 print i, t
 
     return 0
@@ -57,8 +58,11 @@ def extract_text(doc, config):
         print dir(layout)
         #print layout.objs
         for obj in layout:
-            if isinstance(obj, LTTextBox) or isinstance(obj, LTTextLine):
+            if isinstance(obj, LTTextBox):
+                print 'BOX'
                 text.append(obj.get_text())
+            elif isinstance(obj, LTTextLine):
+                print 'LINE'
 
         yield text
 
